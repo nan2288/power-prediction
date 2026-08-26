@@ -381,23 +381,27 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
     feature_cols = [c for c in feature_cols if c in df.columns]
 
     train_mask = (df["Date"] >= pd.to_datetime(system_start)) & (df["Date"] <= user_cutoff) & df["Target_Y"].notna()
-    X_train = df.loc[train_mask, feature_cols]
-    y_train = df.loc[train_mask, "Target_Y"]
-
-    # 🌟 添加：过滤NaN
-    valid_mask = y_train.notna() & X_train.notna().all(axis=1)
+    # 先取数据
+    df_train = df.loc[train_mask].copy()
+    X_train = df_train[feature_cols]
+    y_train = df_train["Target_Y"]
+    
+    # 🌟 过滤NaN（特征和目标都要过滤）
+    valid_mask = y_train.notna().to_numpy()
+    for col in feature_cols:
+        valid_mask &= X_train[col].notna().to_numpy()
+    
     X_train = X_train[valid_mask]
     y_train = y_train[valid_mask]
+    df_train_clean = df_train[valid_mask]
     
-    # 同时过滤sample_weights对应的行
-    df_train_filtered = df.loc[train_mask].copy()
-    df_train_filtered = df_train_filtered[valid_mask]
-    
-    time_diff = (df.loc[train_mask, "Date"].max() - df.loc[train_mask, "Date"]).dt.days
+    # 🌟 用过滤后的数据计算权重
+    time_diff = (df_train_clean["Date"].max() - df_train_clean["Date"]).dt.days
     sample_weights = np.exp(-time_diff / 45.0)
     high_y = y_train.quantile(0.9)
-    sample_weights = sample_weights * np.where(y_train > high_y, 2.0, 1.0) * np.where(df.loc[train_mask, "CoolingDegree"] > 8, 2.5, 1.0)
+    sample_weights = sample_weights * np.where(y_train > high_y, 2.0, 1.0) * np.where(df_train_clean["CoolingDegree"] > 8, 2.5, 1.0)
 
+    print(f"训练样本: {len(X_train)}条")
     model = lgb.LGBMRegressor(
         objective="regression", metric="mae", boosting_type="gbdt",
         n_estimators=500, learning_rate=0.03, num_leaves=31,
@@ -406,15 +410,16 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
     )
     model.fit(X_train, y_train, sample_weight=sample_weights)
 
-    max_cooling = df.loc[train_mask, "CoolingDegree"].max()
-    ht_mask = (df.loc[train_mask, "CoolingDegree"] >= 5) & (df.loc[train_mask, "CoolingDegree"] <= max_cooling)
+    max_cooling = df_train_clean["CoolingDegree"].max()
+    ht_mask = (df_train_clean["CoolingDegree"] >= 5) & (df_train_clean["CoolingDegree"] <= max_cooling)
     if ht_mask.sum() > 30:
-        corr = df.loc[train_mask, "Target_Y"].corr(df.loc[train_mask, "CoolingDegree"])
-        sy = df.loc[train_mask, "Target_Y"].std()
-        sc = df.loc[train_mask, "CoolingDegree"].std()
+        corr = y_train[ht_mask].corr(df_train_clean.loc[ht_mask, "CoolingDegree"])
+        sy = y_train[ht_mask].std()
+        sc = df_train_clean.loc[ht_mask, "CoolingDegree"].std()
         elasticity = corr * sy / sc if (sc > 0 and not np.isnan(corr) and corr > 0) else 0.02
     else:
         elasticity = 0.02
+
     elasticity = min(elasticity, TEMP_ELASTICITY_CAP) * TEMP_CORRECTION_FACTOR
 
     pred_dates = pd.date_range(target_start_dt, target_end_dt)
