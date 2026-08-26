@@ -1,5 +1,5 @@
 streamlit
-lightgbm
+lightgbm==4.3.0
 pandas
 numpy
 plotly
