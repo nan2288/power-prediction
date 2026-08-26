@@ -390,7 +390,7 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
     sample_weights = sample_weights * np.where(y_train > high_y, 2.0, 1.0) * np.where(df.loc[train_mask, "CoolingDegree"] > 8, 2.5, 1.0)
 
     model = lgb.LGBMRegressor(
-        objective="regression", metric="mape", boosting_type="gbdt",
+        objective="regression", metric="mae", boosting_type="gbdt",
         n_estimators=500, learning_rate=0.03, num_leaves=31,
         colsample_bytree=0.6, subsample=0.8, min_child_samples=10,
         random_state=42, verbose=-1
