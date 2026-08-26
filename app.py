@@ -381,21 +381,25 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
     feature_cols = [c for c in feature_cols if c in df.columns]
 
     train_mask = (df["Date"] >= pd.to_datetime(system_start)) & (df["Date"] <= user_cutoff) & df["Target_Y"].notna()
-    # 先取数据
+    
+    # 取数据
     df_train = df.loc[train_mask].copy()
-    X_train = df_train[feature_cols]
-    y_train = df_train["Target_Y"]
+    X_train = df_train[feature_cols].copy()
+    y_train = df_train["Target_Y"].copy()
     
-    # 🌟 过滤NaN（特征和目标都要过滤）
-    valid_mask = y_train.notna().to_numpy()
-    for col in feature_cols:
-        valid_mask &= X_train[col].notna().to_numpy()
+    # 🌟 简单粗暴的NaN过滤：用dropna
+    X_train = X_train.replace([np.inf, -np.inf], np.nan)
+    df_train = df_train.replace([np.inf, -np.inf], np.nan)
     
-    X_train = X_train[valid_mask]
-    y_train = y_train[valid_mask]
-    df_train_clean = df_train[valid_mask]
+    # 合并X和y，一起dropna
+    combined = pd.concat([X_train, y_train.rename("TARGET")], axis=1)
+    combined = combined.dropna()
     
-    # 🌟 用过滤后的数据计算权重
+    X_train = combined[feature_cols]
+    y_train = combined["TARGET"]
+    df_train_clean = df_train.loc[combined.index]
+    
+    # 计算权重
     time_diff = (df_train_clean["Date"].max() - df_train_clean["Date"]).dt.days
     sample_weights = np.exp(-time_diff / 45.0)
     high_y = y_train.quantile(0.9)
@@ -410,6 +414,7 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
     )
     model.fit(X_train, y_train, sample_weight=sample_weights)
 
+    # 温度弹性（用过滤后的数据）
     max_cooling = df_train_clean["CoolingDegree"].max()
     ht_mask = (df_train_clean["CoolingDegree"] >= 5) & (df_train_clean["CoolingDegree"] <= max_cooling)
     if ht_mask.sum() > 30:
@@ -419,7 +424,6 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
         elasticity = corr * sy / sc if (sc > 0 and not np.isnan(corr) and corr > 0) else 0.02
     else:
         elasticity = 0.02
-
     elasticity = min(elasticity, TEMP_ELASTICITY_CAP) * TEMP_CORRECTION_FACTOR
 
     pred_dates = pd.date_range(target_start_dt, target_end_dt)
