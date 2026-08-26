@@ -384,6 +384,15 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
     X_train = df.loc[train_mask, feature_cols]
     y_train = df.loc[train_mask, "Target_Y"]
 
+    # 🌟 添加：过滤NaN
+    valid_mask = y_train.notna() & X_train.notna().all(axis=1)
+    X_train = X_train[valid_mask]
+    y_train = y_train[valid_mask]
+    
+    # 同时过滤sample_weights对应的行
+    df_train_filtered = df.loc[train_mask].copy()
+    df_train_filtered = df_train_filtered[valid_mask]
+    
     time_diff = (df.loc[train_mask, "Date"].max() - df.loc[train_mask, "Date"]).dt.days
     sample_weights = np.exp(-time_diff / 45.0)
     high_y = y_train.quantile(0.9)
