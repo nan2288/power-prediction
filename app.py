@@ -412,7 +412,11 @@ def run_master_forecast(df_input, system_start, run_date, target_start, target_e
         colsample_bytree=0.6, subsample=0.8, min_child_samples=10,
         random_state=42, verbose=-1
     )
-    model.fit(X_train, y_train, sample_weight=sample_weights)
+    X_train_np = X_train.astype(np.float32).to_numpy()
+    y_train_np = y_train.astype(np.float32).to_numpy()
+    
+    model.fit(X_train_np, y_train_np, sample_weight=sample_weights)
+   
 
     # 温度弹性（用过滤后的数据）
     max_cooling = df_train_clean["CoolingDegree"].max()
